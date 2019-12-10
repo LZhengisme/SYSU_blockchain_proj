@@ -18,13 +18,13 @@
     <property name="geometry">
      <rect>
       <x>60</x>
-      <y>80</y>
+      <y>90</y>
       <width>681</width>
       <height>451</height>
      </rect>
     </property>
     <property name="currentIndex">
-     <number>0</number>
+     <number>4</number>
     </property>
     <widget class="QWidget" name="pg_info">
      <widget class="QWidget" name="layoutWidget">
@@ -236,7 +236,11 @@
         </widget>
        </item>
        <item row="3" column="1">
-        <widget class="QLineEdit" name="line_trans_due"/>
+        <widget class="QDateTimeEdit" name="transfer_date">
+         <property name="readOnly">
+          <bool>false</bool>
+         </property>
+        </widget>
        </item>
       </layout>
      </widget>
@@ -271,7 +275,7 @@
         <x>160</x>
         <y>80</y>
         <width>361</width>
-        <height>117</height>
+        <height>118</height>
        </rect>
       </property>
       <layout class="QFormLayout" name="formLayout_3">
@@ -309,7 +313,11 @@
         </widget>
        </item>
        <item row="2" column="1">
-        <widget class="QLineEdit" name="line_pur_due"/>
+        <widget class="QDateTimeEdit" name="purchase_date">
+         <property name="readOnly">
+          <bool>false</bool>
+         </property>
+        </widget>
        </item>
       </layout>
      </widget>
@@ -391,7 +399,11 @@
         </widget>
        </item>
        <item row="1" column="1">
-        <widget class="QLineEdit" name="line_borr_due"/>
+        <widget class="QDateTimeEdit" name="borrowing_date">
+         <property name="readOnly">
+          <bool>false</bool>
+         </property>
+        </widget>
        </item>
       </layout>
      </widget>
@@ -425,13 +437,51 @@
       </layout>
      </widget>
     </widget>
+    <widget class="QWidget" name="pg_repay">
+     <widget class="QPushButton" name="btn_ok_repay">
+      <property name="geometry">
+       <rect>
+        <x>290</x>
+        <y>280</y>
+        <width>89</width>
+        <height>25</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>OK</string>
+      </property>
+     </widget>
+     <widget class="QLabel" name="label_3">
+      <property name="geometry">
+       <rect>
+        <x>210</x>
+        <y>70</y>
+        <width>271</width>
+        <height>21</height>
+       </rect>
+      </property>
+      <property name="text">
+       <string>Click a record to select and repay!</string>
+      </property>
+     </widget>
+     <widget class="QTableWidget" name="table_repay">
+      <property name="geometry">
+       <rect>
+        <x>80</x>
+        <y>110</y>
+        <width>521</width>
+        <height>141</height>
+       </rect>
+      </property>
+     </widget>
+    </widget>
    </widget>
    <widget class="QWidget" name="layoutWidget">
     <property name="geometry">
      <rect>
-      <x>150</x>
+      <x>110</x>
       <y>40</y>
-      <width>514</width>
+      <width>619</width>
       <height>30</height>
      </rect>
     </property>
@@ -464,6 +514,13 @@
       <widget class="QPushButton" name="btn_borrowing">
        <property name="text">
         <string>Borrowing</string>
+       </property>
+      </widget>
+     </item>
+     <item>
+      <widget class="QPushButton" name="btn_repay">
+       <property name="text">
+        <string>Repaying</string>
        </property>
       </widget>
      </item>

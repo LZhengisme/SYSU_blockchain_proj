@@ -20,6 +20,27 @@ from client.bcoserror import BcosException, BcosError
 from client_config import client_config
     
 
+def hex_to_signed(source):
+    """Convert a string hex value to a signed hexidecimal value.
+
+    This assumes that source is the proper length, and the sign bit
+    is the first bit in the first byte of the correct length.
+
+    hex_to_signed("F") should return -1.
+    hex_to_signed("0F") should return 15.
+    """
+    if not isinstance(source, str):
+        raise ValueError("string type required")
+    if 0 == len(source):
+        raise ValueError("string is empty")
+    source = source[2:]
+    sign_bit_mask = 1 << (len(source)*4-1)
+    other_bits_mask = sign_bit_mask - 1
+    value = int(source, 16)
+    return -(value & sign_bit_mask) | (value & other_bits_mask)
+
+
+
 class Bank(QMainWindow, Ui_Bank):
     def __init__(self, parent=None):
         super(Bank, self).__init__(parent)
@@ -32,11 +53,13 @@ class Bank(QMainWindow, Ui_Bank):
         self.headers = ['From','To','Amount','Status','Due date']
         self.table.setHorizontalHeaderLabels(self.headers)
         self.table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
-        self.set_table_content()
         self.prompt.setText('Click one row to select.')
 
     def set_table_content(self):
-        info_tuple = (('zl','srh','cc',),('srh','cc','rjj',),(30,50,1000,),('submitted','submitted','submitted',),('a','b','c',)) # TODO call contracts
+        global client, contract_abi, to_address
+        info_tuple = client.call(to_address, contract_abi, "select", ["", 2])
+        print("receipt:",info_tuple)
+        # info_tuple = (('zl','srh','cc',),('srh','cc','rjj',),(30,50,1000,),('submitted','submitted','submitted',),('a','b','c',)) # TODO call contracts
         info_rows = len(info_tuple[0])
         for i in range(info_rows):
             row = self.table.rowCount()
@@ -48,16 +71,17 @@ class Bank(QMainWindow, Ui_Bank):
             self.table.setItem(row,4,QTableWidgetItem(info_tuple[4][i]))
     
     def on_authorize(self):
+        global client, contract_abi, to_address
         if self.table.selectionModel().hasSelection():
             row = self.table.currentRow()
             args = [self.table.item(row, 0).text(), self.table.item(row, 1).text(), \
                 int(self.table.item(row, 2).text()), "authorized",self.table.item(row, 4).text()]
             print(args)
-            # TODO call contracts
+            info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "update", args)
+            print("receipt:",info_tuple)
             QMessageBox.information(self,'Prompt','Authorize successfully!', QMessageBox.Ok)
             self.table.setRowCount(0)
             self.set_table_content()
-            #TODO Table refresh
         else:
             QMessageBox.warning(self,'Prompt','Please click to select a record!', QMessageBox.Ok)
 
@@ -65,11 +89,14 @@ class Bank(QMainWindow, Ui_Bank):
         self.close()
 
     def on_reject(self):
+        global client, contract_abi, to_address
         if self.table.selectionModel().hasSelection():
             row = self.table.currentRow()
             args = [self.table.item(row, 0).text(), self.table.item(row, 1).text(), \
-                 int(self.table.item(row, 2).text()), "rejected",self.table.item(row, 4).text()]
+                 int(self.table.item(row, 2).text()), self.table.item(row, 4).text()]
             print(args)
+            info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "remove", args)
+            print("receipt:",info_tuple)
             # TODO call contracts
             QMessageBox.information(self,'Prompt','Reject.', QMessageBox.Ok)
             self.table.setRowCount(0)
@@ -83,8 +110,8 @@ class Companies(QMainWindow, Ui_Companies):
         super(Companies, self).__init__(parent)
         self.setupUi(self)
         self.setWindowTitle("Platform for Companies")
-        self.table_info_bor.setColumnCount(5)   ##设置列数
         self.headers = ['From','To','Amount','Status','Due date']
+        self.table_info_bor.setColumnCount(5)   ##设置列数
         self.table_info_bor.setHorizontalHeaderLabels(self.headers)
 
         self.table_info_lent.setColumnCount(5)   ##设置列数
@@ -93,6 +120,8 @@ class Companies(QMainWindow, Ui_Companies):
         self.table_trans_lent.setColumnCount(5)   ##设置列数
         self.table_trans_lent.setHorizontalHeaderLabels(self.headers)
 
+        self.table_repay.setColumnCount(5)   ##设置列数
+        self.table_repay.setHorizontalHeaderLabels(self.headers)
         self.btn_quit.clicked.connect(self.on_quit)
         self.btn_reset_trans.clicked.connect(self.on_reset_transfer)
         self.btn_submit_trans.clicked.connect(self.on_submit_transfer)
@@ -100,11 +129,13 @@ class Companies(QMainWindow, Ui_Companies):
         self.btn_submit_bor.clicked.connect(self.on_submit_borrowing)
         self.btn_reset_pur.clicked.connect(self.on_reset_purchase)
         self.btn_submit_pur.clicked.connect(self.on_submit_purchase)
+        self.btn_ok_repay.clicked.connect(self.on_repayment)
 
         self.btn_transfer.clicked.connect(self.transfer_view)
         self.btn_purchasing.clicked.connect(self.purchase_view)
         self.btn_borrowing.clicked.connect(self.borrowing_view)
         self.btn_info.clicked.connect(self.info_view)
+        self.btn_repay.clicked.connect(self.repay_view)
 
         self.table_info_bor.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.table_info_lent.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
@@ -112,20 +143,32 @@ class Companies(QMainWindow, Ui_Companies):
 
     def set_basic_info(self, name):
         global client, contract_abi, to_address
-        balance = client.call(to_address,contract_abi,"get_asset", [name])[0]
+        self.balance = client.call(to_address,contract_abi,"get_asset", [name])[0]
+        self.table_info_bor.setRowCount(0)
+        self.table_info_lent.setRowCount(0)
+        self.table_trans_lent.setRowCount(0)
+        self.table_repay.setRowCount(0)
         self.set_table_info_borrowed_content(name)
         self.set_table_info_lent_content(name)
         self.set_table_trans_lent_content(name)
-        total_borrowed = 0
-        total_lent = 0
+        self.set_table_repay_content(name)
+        self.company_name = name
+        self.total_borrowed = 0
+        self.total_lent = 0
         for i in range(self.table_info_bor.rowCount()):
-            total_borrowed += int(self.table_info_bor.item(i,2).text())
+            self.total_borrowed += int(self.table_info_bor.item(i,2).text())
         for i in range(self.table_info_lent.rowCount()):
-            total_lent += int(self.table_info_lent.item(i,2).text())
-        self.line_basic_bal.setText(str(balance))
-        self.line_basic_borr.setText(str(total_borrowed))
-        self.line_basic_lent.setText(str(total_lent))
+            self.total_lent += int(self.table_info_lent.item(i,2).text())
+        self.line_basic_bal.setText(str(self.balance))
+        self.line_basic_borr.setText(str(self.total_borrowed))
+        self.line_basic_lent.setText(str(self.total_lent))
         self.dateTimeEdit.setDateTime(QDateTime.currentDateTime())
+        self.transfer_date.setDateTime(QDateTime.currentDateTime())
+        self.borrowing_date.setDateTime(QDateTime.currentDateTime())
+        self.purchase_date.setDateTime(QDateTime.currentDateTime())
+        print(type(self.dateTimeEdit.dateTime().toString("yyy/MM/dd hh:mm:ss")))
+        print(self.dateTimeEdit.dateTime().toString("yyyy/MM/dd hh:mm:ss") > '2019/12/06 13:45:53')
+
 
 
     def set_table_info_borrowed_content(self,name):
@@ -173,43 +216,119 @@ class Companies(QMainWindow, Ui_Companies):
             self.table_info_lent.setItem(row,2,QTableWidgetItem(str(info_tuple[2][i])))
             self.table_info_lent.setItem(row,3,QTableWidgetItem(info_tuple[3][i]))
             self.table_info_lent.setItem(row,4,QTableWidgetItem(info_tuple[4][i]))
-            
+    def set_table_repay_content(self,name):
+        global client, contract_abi, to_address
+        info_tuple = client.call(to_address, contract_abi, "select", [name, 1])
+        print("receipt:",info_tuple)
+        # info_tuple = (('zl','srh','cc',),('srh','cc','rjj',),(30,50,1000,),('submitted','submitted','submitted',),('a','b','c',)) # TODO call contracts
+        info_rows = len(info_tuple[0])
+        for i in range(info_rows):
+            row = self.table_repay.rowCount()
+            self.table_repay.setRowCount(row + 1)
+            self.table_repay.setItem(row,0,QTableWidgetItem(info_tuple[0][i]))
+            self.table_repay.setItem(row,1,QTableWidgetItem(info_tuple[1][i]))
+            self.table_repay.setItem(row,2,QTableWidgetItem(str(info_tuple[2][i])))
+            self.table_repay.setItem(row,3,QTableWidgetItem(info_tuple[3][i]))
+            self.table_repay.setItem(row,4,QTableWidgetItem(info_tuple[4][i]))         
     def info_view(self):
         self.stackedWidget.setCurrentIndex(0)
+        self.set_basic_info(self.company_name)
     def transfer_view(self):
         self.stackedWidget.setCurrentIndex(1)
+        self.set_basic_info(self.company_name)
     def purchase_view(self):
         self.stackedWidget.setCurrentIndex(2)
     def borrowing_view(self):
         self.stackedWidget.setCurrentIndex(3)     
+    def repay_view(self):
+        self.stackedWidget.setCurrentIndex(4)
+        self.set_basic_info(self.company_name)
+
     def on_quit(self):
         self.close()
     def on_reset_transfer(self):
         self.line_trans_from.clear()
         self.line_trans_to.clear()
-        self.line_trans_due.clear()
         self.line_trans_amt.clear()
     def on_submit_transfer(self):
-        _from = self.line_trans_from.text()
-        _to = self.line_trans_to.text()
-        _due = self.line_trans_due.text()
-        _amt = self.line_trans_amt.text()
-        print(_from,_to,_due,_amt)
+        global client, contract_abi, to_address
+        if self.table_trans_lent.selectionModel().hasSelection():
+            row = self.table_trans_lent.currentRow()
+            _from = self.table_trans_lent.item(row, 0).text()
+            _due = self.table_trans_lent.item(row, 4).text()
+            _prev_amt = int(self.table_trans_lent.item(row, 2).text())
+            self.line_trans_from.setText(_from)
+            _to = self.line_trans_to.text()
+            self.transfer_date.setDateTime(QDateTime.fromString(_due, 'yyyy/MM/dd hh:mm:ss'))
+            _amt = int(self.line_trans_amt.text())
+            _prev_amt = 50
+            print(_from,_to,_due,_amt)
+            args = [_from, self.company_name, _to, _prev_amt, _amt,_due]
+            if self.table_trans_lent.item(row, 3).text() == "authorized":
+                info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "transfer", args)
+                print("receipt:",info_tuple['output'])
+                res = hex_to_signed(info_tuple['output'])
+                if res == -3:
+                    QMessageBox.warning(self,'Error','All companies must be registered first!', QMessageBox.Ok)
+                elif res == 1:
+                    QMessageBox.information(self,'Prompt','Transfer successfully.', QMessageBox.Ok)
+            else:
+                QMessageBox.warning(self,'Error','You can only transfer [Authorized] receipts!', QMessageBox.Ok)
+        else:
+            QMessageBox.warning(self,'Prompt','Please click to select a record!', QMessageBox.Ok)
+        
+
     def on_reset_borrowing(self):
         self.line_borr_amt.clear()
-        self.line_borr_due.clear()
+
     def on_submit_borrowing(self):
-        _amt = self.line_borr_amt.text()
-        _due = self.line_borr_due.text()
+        _amt = int(self.line_borr_amt.text())
+        _due = self.borrowing_date.dateTime().toString("yyyy/MM/dd hh:mm:ss")
+        if _amt > (self.total_lent - self.total_borrowed):
+            QMessageBox.warning(self,'Error','You don\'t have enough capacity to finance.', QMessageBox.Ok)
+        else:
+            global client, contract_abi, to_address
+            args = [self.company_name,"bank", _amt,_due]
+            info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "borrow_money", args)
+            QMessageBox.information(self,'Prompt','Financing successfully.', QMessageBox.Ok)
 
     def on_reset_purchase(self):
         self.line_pur_amt.clear()
-        self.line_pur_due.clear()
         self.line_pur_to.clear()
+
     def on_submit_purchase(self):
         _amt = self.line_pur_amt.text()
-        _due = self.line_pur_due.text()
+        _due = self.purchase_date.dateTime().toString("yyyy/MM/dd hh:mm:ss")
         _to = self.line_pur_to.text()      
+        global client, contract_abi, to_address
+        args = [self.company_name , _to, int(_amt),_due]
+        info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "purchasing", args)
+        print("receipt:",info_tuple['output'])
+        res = hex_to_signed(info_tuple['output'])
+        if res == -3:
+            QMessageBox.warning(self,'Error','All companies must be registered first!', QMessageBox.Ok)
+        elif res == 1:
+            QMessageBox.information(self,'Prompt','Purchasing request submitted successfully.', QMessageBox.Ok)
+
+    def on_repayment(self):
+        global client, contract_abi, to_address
+        if self.table_repay.selectionModel().hasSelection():
+            row = self.table_repay.currentRow()
+            args = [self.table_repay.item(row, 0).text(), self.table_repay.item(row, 1).text(), \
+                 int(self.table_repay.item(row, 2).text()),self.table_repay.item(row, 4).text()]
+            print(args)
+            if self.table_repay.item(row, 3).text() == "authorized":
+                info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "due_day", args)
+                print("receipt:",info_tuple)
+                # TODO call contracts
+                QMessageBox.information(self,'Prompt','Repay.', QMessageBox.Ok)
+                self.table_repay.setRowCount(0)
+                self.set_table_repay_content(self.company_name)
+                #TODO Table refresh
+            else:
+                QMessageBox.warning(self,'Error','You can only repay [Authorized] receipts!', QMessageBox.Ok)
+        else:
+            QMessageBox.warning(self,'Prompt','Please click to select a record!', QMessageBox.Ok)
 
 
 class Manager(QMainWindow,Ui_Manager):
@@ -242,10 +361,9 @@ class Manager(QMainWindow,Ui_Manager):
     def on_reset(self):
         self.edit_name.clear()
         self.edit_pwd.clear()
-        self.edit_type.clear()
 
     def on_press_register(self):
-        name, password, _type = self.edit_name.text(), self.edit_pwd.text(), self.edit_type.text()
+        name, password = self.edit_name.text(), self.edit_pwd.text()
         max_account_len = 240
         if len(name) > max_account_len:
             QMessageBox.warning(self, 'Error', 'The name should not exceed 240 characters!')
@@ -297,8 +415,6 @@ class Manager(QMainWindow,Ui_Manager):
         self.set_table_content()
 
 
-    def get_name_pwd(self):
-        return self.edit_name.text(),self.edit_pwd.text()
 
 class Login(QMainWindow, Ui_Login):
     def __init__(self, parent=None):
@@ -313,10 +429,11 @@ class Login(QMainWindow, Ui_Login):
         password = self.line_pwd.text()
         if name == 'admin' and password == 'admin':
             manager_window.show()
-            self.close()
+            # self.close()
         elif name == "bank" and password == "123456":
             bank_window.show()
-            self.close()
+            bank_window.set_table_content()
+            # self.close()
         else:
             keyfile = "{}/{}.keystore".format(client_config.account_keyfile_path, name)
             # the account doesn't exists
@@ -325,96 +442,37 @@ class Login(QMainWindow, Ui_Login):
                         "error",
                         "account {} doesn't exists".format(name),
                         QMessageBox.Yes)
-                raise BcosException("account {} doesn't exists".format(name))
-            print("show account : {}, keyfile:{} ,password {}  ".format(name, keyfile, password))
-            try:
-                with open(keyfile, "r") as dump_f:
-                    keytext = json.load(dump_f)
-                    privkey = Account.decrypt(keytext, password)
-                    ac2 = Account.from_key(privkey)
-                    print("address:\t", ac2.address)
-                    print("privkey:\t", encode_hex(ac2.key))
-                    print("pubkey :\t", ac2.publickey)
-                    company_window.show()
-                    company_window.set_basic_info(name)
-                    self.close()
-            except Exception as e:
-                QMessageBox.warning(self,
-                        "error",
-                        ("load account info for [{}] failed,"
-                                        " error info: {}!").format(name, e),
-                        QMessageBox.Yes)
+            else:
+                print("show account : {}, keyfile:{} ,password {}  ".format(name, keyfile, password))
+                try:
+                    with open(keyfile, "r") as dump_f:
+                        keytext = json.load(dump_f)
+                        privkey = Account.decrypt(keytext, password)
+                        ac2 = Account.from_key(privkey)
+                        print("address:\t", ac2.address)
+                        print("privkey:\t", encode_hex(ac2.key))
+                        print("pubkey :\t", ac2.publickey)
+                        company_window.show()
+                        company_window.set_basic_info(name)
+                        # self.close()
+                except Exception as e:
+                    QMessageBox.warning(self,
+                            "error",
+                            ("load account info for [{}] failed,"
+                                            " error info: {}!").format(name, e),
+                            QMessageBox.Yes)
 
 
 if __name__ == "__main__":
-    # if os.path.isfile(client_config.solc_path) or os.path.isfile(client_config.solcjs_path):
-        # Compiler.compile_file("contracts/TableTest.sol")
-    abi_file = "contracts/TableTest.abi"
+    # need to specify abi file and to_address.
+    abi_file = "contracts/SupplyCF.abi"
     data_parser = DatatypeParser()
     data_parser.load_abi_file(abi_file)
     contract_abi = data_parser.contract_abi
     client = BcosClient()
-    # print(client.getinfo())
-    # print("\n>>Deploy:----------------------------------------------------------")
-    # with open("contracts/TableTest.bin", 'r') as load_f:
-    #     contract_bin = load_f.read()
-    #     load_f.close()
-    # result = client.deploy(contract_bin)
-    # print("deploy", result)
-    # print("new address : ", result["contractAddress"])
-    # contract_name = os.path.splitext(os.path.basename(abi_file))[0]
-    # memo = "tx:" + result["transactionHash"]
-    # # 把部署结果存入文件备查
-    # ContractNote.save_address(contract_name,
-    #                         result["contractAddress"],
-    #                         int(result["blockNumber"], 16), memo)
-    # to_address = result['contractAddress']  # use new deploy address
-    to_address = '0xe05b4dbef2b70c251f26752adc995c018764315e'
-    # receipt = client.call(to_address,contract_abi,"create")
-    # print("receipt:",receipt)
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"create_company_table")
-    # print("receipt:",receipt)
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"create_receipt_table")
-    # print("receipt:",receipt)
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"insert",["shirunhao", "baoye", 250, "submitted", "tom"])
-    # print("receipt:",receipt)
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"register",["shirunhao", "srh", "tom"])
-    # print("receipt:",receipt['output'])
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"register",["baoye", "by", "tom"])
-    # print("receipt:",receipt['output'])
-    # receipt = client.sendRawTransactionGetReceipt(to_address,contract_abi,"purchasing",["srh", "by", 250, "tom"])
-    # print("receipt:",receipt['output'])
-    # receipt = client.call(to_address,contract_abi,"select",["shirunhao",0])
-    # print("receipt:",receipt)
-    # receipt = client.sendRawTransactionGetReceipt('0x4e5ddc8943d07c61c034303407e58f7b3289ff21',contract_abi,"create_receipt_table")
-    # # print("\n>>parse receipt and transaction:----------------------------------------------------------")
-    # logresult = data_parser.parse_event_logs(receipt["logs"])
-    # i = 0
-    # for log in logresult:
-    #     if 'eventname' in log:
-    #         i = i + 1
-    #         print("{}): log name: {} , data: {}".format(i,log['eventname'],log['eventdata']))
-    # receipt = client.sendRawTransactionGetReceipt('0x4e5ddc8943d07c61c034303407e58f7b3289ff21',contract_abi,"create_companies_table")
+    to_address = '0xcda895ec53a73fbc3777648cb4c87b38e252f876'
 
-    # print("\n>>parse receipt and transaction:----------------------------------------------------------")
-    # logresult = data_parser.parse_event_logs(receipt["logs"])
-    # i = 0
-    # for log in logresult:
-    #     if 'eventname' in log:
-    #         i = i + 1
-    #         print("{}): log name: {} , data: {}".format(i,log['eventname'],log['eventdata']))
-    # args = [to_checksum_address('0x22b99c4c079f879032e8b3b61d48dd6b0c9c6463'), 
-    # to_checksum_address('0x1fdc502734ad516d0b85b2ce55d1fa17c46ce49a'), 250, 'tom']
-    # receipt = client.sendRawTransactionGetReceipt(str('0x4e5ddc8943d07c61c034303407e58f7b3289ff21'),contract_abi,"select_one",[0])#to_checksum_address('0x22b99c4c079f879032e8b3b61d48dd6b0c9c6463')])
-    # # receipt = client.sendRawTransactionGetReceipt(str('0x39d0a8836cabd9f1f1d76e9921decd2f4dbd3c5c'),contract_abi,"get_cnt")
-    # print("\n>>parse receipt and transaction:----------------------------------------------------------")
-    # logresult = data_parser.parse_event_logs(receipt["logs"])
-    # i = 0
-    # for log in logresult:
-    #     if 'eventname' in log:
-    #         i = i + 1
-    #         print("{}): log name: {} , data: {}".format(i,log['eventname'],log['eventdata']))
-    # print("receipt:",receipt)
+
     app = QtWidgets.QApplication(sys.argv)
     login_window = Login()
     manager_window = Manager()
