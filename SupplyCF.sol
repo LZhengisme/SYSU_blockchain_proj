@@ -18,7 +18,7 @@ contract SupplyCF {
     }
     function create_company_table() public returns(int){
         TableFactory tf = TableFactory(0x1001); //The fixed address is 0x1001 for TableFactory
-        int count = tf.createTable("company_t", "dummy", "name, address, type");
+        int count = tf.createTable("company_table_t", "dummy", "name, address, type");
         emit CreateResult(count);
 
         return count;
@@ -26,7 +26,7 @@ contract SupplyCF {
     // register for companies
     function register(string _name, string _address, string _type) public returns (int count){
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("company_t");
+        Table table = tf.openTable("company_table_t");
         Entry entry_to_insert = table.newEntry();
         entry_to_insert.set("dummy", "active");
         entry_to_insert.set("name", _name);
@@ -42,7 +42,7 @@ contract SupplyCF {
     }
     function select_registered() public returns (string[], string[], string[]){
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("company_t");
+        Table table = tf.openTable("company_table_t");
         Entries entries = table.select("active", table.newCondition());
         string[] memory name_list = new string[](uint256(entries.size()));
         string[] memory type_list = new string[](uint256(entries.size()));
@@ -59,7 +59,7 @@ contract SupplyCF {
     // whether a company given name is registered or not.
     function is_registered(string name) public returns (int count){
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("company_t");
+        Table table = tf.openTable("company_table_t");
         Condition condition = table.newCondition();
         condition.EQ("name", name);
         Entries entries = table.select("active", condition);
@@ -72,7 +72,7 @@ contract SupplyCF {
     //create table
     function create_receipt_table() public returns(int){
         TableFactory tf = TableFactory(0x1001); //The fixed address is 0x1001 for TableFactory
-        int count = tf.createTable("receipt_t", "dummy", "from, to, amount,status, due_date");
+        int count = tf.createTable("receipt_table_t", "dummy", "from, to, amount,status, due_date");
 	      emit CreateResult(count);
 
 	      return count;
@@ -97,7 +97,7 @@ contract SupplyCF {
     //select records
     function select(string company, int mode) public constant returns(string[], string[], int[], string[], string[]){
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("receipt_t");
+        Table table = tf.openTable("receipt_table_t");
         Condition condition = table.newCondition();
         if(mode == 1){
             condition.EQ("from", company);
@@ -114,7 +114,7 @@ contract SupplyCF {
     //insert records
     function insert(string _from, string _to, int amt, string sta, string dd) public returns(int) {
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("receipt_t");
+        Table table = tf.openTable("receipt_table_t");
         Entry entry_to_insert = table.newEntry();
         entry_to_insert.set("dummy", "active");
         entry_to_insert.set("from", _from);
@@ -141,8 +141,9 @@ contract SupplyCF {
     //the receipt on due day
     function due_day(string _from, string _to, int _amount, string _expiration) public returns(int){
         remove(_from, _to, _amount, _expiration);
-        if(keccak256(_to) == keccak256("bank")){
-            assets[_from] -= _amount;
+        assets[_from] -= _amount;
+        if(keccak256(_to) != keccak256("bank")){
+            assets[_to] += _amount;
         }
     }
     function transfer (string _from, string _to,string _to_to, int prev_amt,int _amount, string dd) public returns(int) {
@@ -160,7 +161,7 @@ contract SupplyCF {
     //update records
     function update(string _from, string _to, int amt, string sta, string dd) public returns(int) {
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("receipt_t");
+        Table table = tf.openTable("receipt_table_t");
         Entry entry = table.newEntry();
         entry.set("dummy", "active");
         entry.set("from", _from);
@@ -171,6 +172,7 @@ contract SupplyCF {
         Condition condition = table.newCondition();
         condition.EQ("from", _from);
         condition.EQ("to", _to);
+        condition.EQ("due_date", dd);
         if(keccak256(sta) == keccak256("authorized") && keccak256(_to) == keccak256("bank")){
             assets[_from] += amt;
         }
@@ -181,7 +183,7 @@ contract SupplyCF {
     //remove records
     function remove(string _from, string _to, int amt, string dd) public returns(int){
         TableFactory tf = TableFactory(0x1001);
-        Table table = tf.openTable("receipt_t");
+        Table table = tf.openTable("receipt_table_t");
         Condition condition = table.newCondition();
         condition.EQ("from", _from);
         condition.EQ("to", _to);

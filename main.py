@@ -136,7 +136,7 @@ class Companies(QMainWindow, Ui_Companies):
         self.btn_borrowing.clicked.connect(self.borrowing_view)
         self.btn_info.clicked.connect(self.info_view)
         self.btn_repay.clicked.connect(self.repay_view)
-
+        self.stackedWidget.setCurrentIndex(0)
         self.table_info_bor.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.table_info_lent.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.table_trans_lent.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
@@ -261,19 +261,21 @@ class Companies(QMainWindow, Ui_Companies):
             _to = self.line_trans_to.text()
             self.transfer_date.setDateTime(QDateTime.fromString(_due, 'yyyy/MM/dd hh:mm:ss'))
             _amt = int(self.line_trans_amt.text())
-            _prev_amt = 50
             print(_from,_to,_due,_amt)
-            args = [_from, self.company_name, _to, _prev_amt, _amt,_due]
-            if self.table_trans_lent.item(row, 3).text() == "authorized":
-                info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "transfer", args)
-                print("receipt:",info_tuple['output'])
-                res = hex_to_signed(info_tuple['output'])
-                if res == -3:
-                    QMessageBox.warning(self,'Error','All companies must be registered first!', QMessageBox.Ok)
-                elif res == 1:
-                    QMessageBox.information(self,'Prompt','Transfer successfully.', QMessageBox.Ok)
+            if _amt > _prev_amt:
+                QMessageBox.warning(self,'Error','Your transfer amount is too large!', QMessageBox.Ok)
             else:
-                QMessageBox.warning(self,'Error','You can only transfer [Authorized] receipts!', QMessageBox.Ok)
+                args = [_from, self.company_name, _to, _prev_amt, _amt,_due]
+                if self.table_trans_lent.item(row, 3).text() == "authorized":
+                    info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "transfer", args)
+                    print("receipt:",info_tuple['output'])
+                    res = hex_to_signed(info_tuple['output'])
+                    if res == -3:
+                        QMessageBox.warning(self,'Error','All companies must be registered first!', QMessageBox.Ok)
+                    elif res == 1:
+                        QMessageBox.information(self,'Prompt','Transfer successfully.', QMessageBox.Ok)
+                else:
+                    QMessageBox.warning(self,'Error','You can only transfer [Authorized] receipts!', QMessageBox.Ok)
         else:
             QMessageBox.warning(self,'Prompt','Please click to select a record!', QMessageBox.Ok)
         
@@ -302,7 +304,8 @@ class Companies(QMainWindow, Ui_Companies):
         _to = self.line_pur_to.text()      
         global client, contract_abi, to_address
         args = [self.company_name , _to, int(_amt),_due]
-        info_tuple = client.sendRawTransactionGetReceipt(to_address, contract_abi, "purchasing", args)
+        info_tuple = client.sendRawTransactionGetReceipt(to_address, \
+            contract_abi, "purchasing", args)
         print("receipt:",info_tuple['output'])
         res = hex_to_signed(info_tuple['output'])
         if res == -3:
@@ -343,6 +346,7 @@ class Manager(QMainWindow,Ui_Manager):
         self.btn_reset.clicked.connect(self.on_reset)
         self.table.setEditTriggers(QtWidgets.QTableWidget.NoEditTriggers)
         self.set_table_content()
+        self.stackedWidget.setCurrentIndex(0)
 
     def set_table_content(self):
         global client, contract_abi, to_address
@@ -470,7 +474,7 @@ if __name__ == "__main__":
     data_parser.load_abi_file(abi_file)
     contract_abi = data_parser.contract_abi
     client = BcosClient()
-    to_address = '0xcda895ec53a73fbc3777648cb4c87b38e252f876'
+    to_address = '0x75673e6859e6a4f791d583a6874e97adafb9b923'
 
 
     app = QtWidgets.QApplication(sys.argv)
